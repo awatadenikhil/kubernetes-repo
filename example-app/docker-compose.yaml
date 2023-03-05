@@ -1,0 +1,10 @@
+version: "3.4"
+services:  
+  webfrontendappwithdocker:
+    image: webfrontendappwithdocker:v1
+    build:
+      context: ./WebFrontEndApp/
+      dockerfile: ./Dockerfile
+    ports:
+      - 2000:80
+  

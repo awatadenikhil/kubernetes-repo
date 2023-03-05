@@ -1,0 +1,7 @@
+apiVersion: v1
+data:
+  nikhil-response-header: "Data for Auth"
+kind: ConfigMap
+metadata:
+  name: add-custom-headers
+  namespace: ingress-nginx
