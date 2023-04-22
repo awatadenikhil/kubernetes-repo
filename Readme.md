@@ -1,2 +1,1 @@
-# Project information
--   create app interact with each other using 
+This project is consist of frontend app and api and both are deployed in kubernates.in order to add header before request reach to API use nginx as reverse proxy.also used pipeline to deploy using azure pipline
