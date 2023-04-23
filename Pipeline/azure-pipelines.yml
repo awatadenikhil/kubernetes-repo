@@ -1,0 +1,70 @@
+﻿trigger:
+  branches:
+    include:
+      - main
+pool:
+  vmImage: "ubuntu-latest"
+
+variables:  
+  REPO_NAME: "kube_project"
+  AKS-SERVICE-PRINCIPAL-CLIENT-ID : "aa"
+  AKS-SERVICE-PRINCIPAL-CLIENT-SECRET : "bb"
+  AKS-SERVICE-PRINCIPAL-TENANT-ID : "cc"
+  AKSRG : "rg-kube-demo1"
+  AKS : "kubewebservice"
+
+stages:
+  - stage: build_docker_image
+    displayName: Build Docker Image
+    jobs:
+      - job: "build_docker_image"
+        displayName: "Build Docker Image"
+        steps:
+          - task: Docker@2
+            inputs:
+              command: build
+              Dockerfile: example-app/WebFrontEndApp/Dockerfile
+              repository: $(REPO_NAME)
+              tags: $(Build.BuildId)
+              arguments: --no-cache
+            displayName: "Build image"
+
+          - task: Docker@2
+            inputs:
+              repository: "$(REPO_NAME)"
+              command: save
+              arguments: "$(REPO_NAME):$(Build.BuildId) --output $(Build.ArtifactStagingDirectory)/$(REPO_NAME).image.tar"
+              addPipelineData: false
+            displayName: "Save image as tar"
+
+          - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: '$(Build.ArtifactStagingDirectory)/$(REPO_NAME).image.tar'
+              artifactName: "image"
+
+  - stage: deploy_dev
+    dependsOn: build_docker_image    
+    displayName: Deploy to Dev
+    condition: succeeded()
+    variables:
+    - group: 'var-grp-kube-pipeline'
+    jobs:
+      - job: push_docker_image        
+        displayName: Push Docker Image
+        steps:
+          - template: azure-pipeline-build-docker.yml
+            parameters:
+              azureRmServiceConnectionName: "azure_service_connection"
+              azureContainerRegistryServiceConnectionName: "webappdockerserviceconnection"
+      
+      - deployment: kube_push_deployment_replica
+        displayName: Push Deployment
+        dependsOn: push_docker_image
+        environment: Development
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - template: azure-kube-deploy.yml
+                  parameters:
+                    azureRmServiceConnectionName: "azure_service_connection"

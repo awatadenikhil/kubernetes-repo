@@ -1,0 +1,87 @@
+parameters:
+  - name: azureRmServiceConnectionName
+    type: string
+  - name: azureContainerRegistryServiceConnectionName
+    type: string
+
+steps:
+  - task: DownloadBuildArtifacts@0
+    inputs:
+      buildType: 'current'
+      downloadType: 'single'
+      artifactName: 'image'
+      downloadPath: '$(Build.ArtifactStagingDirectory)'
+
+  - task: DockerInstaller@0
+    displayName: 'Install Docker'
+
+  - task: Docker@2
+    displayName: login
+    inputs:
+      containerRegistry: ${{ parameters.azureContainerRegistryServiceConnectionName }}
+      command: login
+
+  - task: Docker@2
+    displayName: 'Load image from tar'
+    inputs:
+      containerRegistry: ${{ parameters.azureContainerRegistryServiceConnectionName }}
+      command: load
+      arguments: '--input "$(Build.ArtifactStagingDirectory)/image/$(REPO_NAME).image.tar"'
+
+  - task: Docker@2
+    displayName: 'Re-tag image with BuildId'
+    inputs:
+      containerRegistry: ${{ parameters.azureContainerRegistryServiceConnectionName }}
+      repository: '$(REPOSITORY_NAME)'
+      command: tag
+      arguments: '$(REPO_NAME):$(Build.BuildId) $(ACR_DOMAIN)/$(REPO_NAME):$(Build.BuildId)'
+
+  - task: Docker@2
+    displayName: 'Re-tag image with Latest'
+    inputs:
+      containerRegistry: ${{ parameters.azureContainerRegistryServiceConnectionName }}
+      repository: '$(REPOSITORY_NAME)'
+      command: tag
+      arguments: '$(REPO_NAME):$(Build.BuildId) $(ACR_DOMAIN)/$(REPO_NAME):latest'
+
+  - task: AzureCLI@2
+    displayName: 'Unlock image'
+    inputs:
+      azureSubscription: ${{ parameters.azureRmServiceConnectionName }}
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        az acr repository update --name $(ACR_DOMAIN) --image $(REPO_NAME):latest --write-enabled true
+    continueOnError: true
+
+  - task: Docker@2
+    displayName: Push to ACR
+    inputs:
+      command: 'push'
+      containerRegistry: ${{ parameters.azureContainerRegistryServiceConnectionName }}
+      repository: $(REPO_NAME)
+      tags: |
+        $(Build.BuildId)
+        latest
+  
+  - task: AzureCLI@2
+    displayName: 'Lock image'
+    inputs:
+      azureSubscription: ${{ parameters.azureRmServiceConnectionName }}
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        az acr repository update --name $(ACR_DOMAIN) --image $(REPO_NAME):latest --write-enabled false
+
+  - task: Docker@2
+    displayName: logout
+    inputs:
+      containerRegistry: ${{ parameters.azureContainerRegistryServiceConnectionName }}
+      command: logout
+      
+  - task: Docker@2
+    displayName: 'Clean up'
+    inputs:
+      containerRegistry: ${{ parameters.azureContainerRegistryServiceConnectionName }}
+      command: image
+      arguments: 'prune -a -f'

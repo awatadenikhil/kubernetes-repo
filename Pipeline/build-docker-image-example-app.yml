@@ -1,0 +1,40 @@
+﻿trigger:
+  branches:
+    include:
+      - main
+pool:
+  vmImage: "ubuntu-latest"
+
+variables:
+  IMAGE_NAME: "example-app-image"
+  REPO_NAME: "kube_project"
+
+stages:
+  - stage: build_docker_image
+    displayName: Build Docker Image
+    jobs:
+      - job: "build_docker_image"
+        displayName: "Build Docker Image"
+        steps:
+          - task: Docker@2
+            inputs:
+              command: build
+              Dockerfile: example-app/WebFrontEndApp/Dockerfile
+              repository: $(REPO_NAME)
+              tags: $(Build.BuildId)
+              arguments: --no-cache
+            displayName: "Build image"
+
+          - task: Docker@2
+            inputs:
+              repository: "$(REPO_NAME)"
+              command: save
+              arguments: "$(REPO_NAME):$(Build.BuildId) --output $(Build.ArtifactStagingDirectory)/$(IMAGE_NAME).image.tar"
+              addPipelineData: false
+            displayName: "Save image as tar"
+
+          - task: PublishBuildArtifacts@1
+            inputs:
+              pathToPublish: '$(Build.ArtifactStagingDirectory)/$(IMAGE_NAME).image.tar'
+              artifactName: "image"
+

@@ -1,0 +1,107 @@
+parameters:
+  - name: azureRmServiceConnectionName
+    type: string
+
+steps:
+  - task: KubectlInstaller@0
+    displayName: 'Install Kubectl latest'
+  - bash: |
+      sudo apt-get update
+      sudo apt-get install -y wget apt-transport-https software-properties-common unzip powershell
+    displayName: Setup Prequisites for Kube-Deploy
+
+  - bash: |
+      # Download and extract
+      killall -9 kubelogin
+      wget https://github.com/Azure/kubelogin/releases/download/v0.0.9/kubelogin-linux-amd64.zip -O kubelogin.zip
+      sudo rm -rf ./bin/linux_amd64/kubelogin
+      unzip kubelogin.zip
+      chmod +x ./bin/linux_amd64/kubelogin
+
+    displayName: 'Setup kubelogin'
+  - bash: |
+      # Get kubeconfig
+      AZURE_CONFIG_DIR=$(System.DefaultWorkingDirectory)
+      az login --service-principal --username "$(AKS-SERVICE-PRINCIPAL-CLIENT-ID)" --password "$(AKS-SERVICE-PRINCIPAL-CLIENT-SECRET)" --tenant "$(AKS-SERVICE-PRINCIPAL-TENANT-ID)"
+      az aks get-credentials --overwrite-existing --resource-group $(AKSRG) --name $(AKS)
+      az logout
+      AZURE_CONFIG_DIR=""
+
+      # Set kubelogin path
+      kubeloginPath="`pwd`/bin/linux_amd64"
+      echo "##vso[task.prependpath]$kubeloginPath"
+      echo "##vso[task.setvariable variable=AAD_SERVICE_PRINCIPAL_CLIENT_ID]$(AKS-SERVICE-PRINCIPAL-CLIENT-ID)"
+      echo "##vso[task.setvariable variable=AAD_SERVICE_PRINCIPAL_CLIENT_SECRET]$(AKS-SERVICE-PRINCIPAL-CLIENT-SECRET)"
+
+      $kubeloginPath/kubelogin convert-kubeconfig -l spn
+    displayName: 'Get Kube Creds'
+  - bash: |
+      kubectl create secret generic kube-demo-api-secret-ref \
+      --from-literal=My_SECRET="12345" \
+      --dry-run=client -o yaml |
+      kubectl apply -f -
+    displayName: Create ENV Secrets
+  - bash: |
+      cat << EOF > $(System.DefaultWorkingDirectory)/deploy.yaml
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: example-deploy
+        namespace: example-app
+        labels:
+          app: example-app
+        annotations:
+      spec:
+        selector:
+          matchLabels:
+            app: example-app
+        replicas: 2
+        strategy:
+          type: RollingUpdate
+          rollingUpdate:
+            maxSurge: 1
+            maxUnavailable: 0
+        template:
+          metadata:
+            labels:
+              app: example-app
+          spec:
+            containers:
+            - name: example-app
+              image: containerregistrywebapp.azurecr.io/kube_project:latest
+              ports:
+              - containerPort: 80
+              resources:
+                requests:
+                  memory: "64Mi"
+                  cpu: "50m"
+                limits:
+                  memory: "256Mi"
+                  cpu: "500m"
+              volumeMounts:
+              - name: secret-volume
+                mountPath: /secrets/
+              - name: config-volume
+                mountPath: /configs/
+            volumes:
+            - name: secret-volume
+              secret:
+                secretName: mysecret
+            - name: config-volume
+              configMap:
+                name: example-config 
+      EOF
+
+      cat $(System.DefaultWorkingDirectory)/deploy.yaml
+      # Apply Kube Deployment
+      kubectl apply -f $(System.DefaultWorkingDirectory)/deploy.yaml
+    displayName: Prepare Kube.yml
+
+  - bash: |
+      # Restart deployment with latest package
+      kubectl rollout restart deployment example-deploy -n=example-app
+
+      # wait to deploy
+      sleep 10
+      
+    displayName: Deploy to Kubernetes
